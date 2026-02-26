@@ -2,6 +2,7 @@
 // Usage: magma -b label:=foo run_fill_genus.m
 // Batch: magma -b labels:=foo:bar:baz run_fill_genus.m
 // Options: timeout:=N (default 60, seconds per label)
+//          done:=1 (print DONE sentinel on completion, for wrapper scripts)
 //
 // Parallel across servers:
 //   xargs -n 100 < genera_todo.txt | tr ' ' ':' > genera_todo_chunked.txt
@@ -21,6 +22,9 @@ SetVerbose("FillGenus", StringToInteger(verbose));
 if not assigned timeout then timeout := "60"; end if;
 timeout := StringToInteger(timeout);
 
+if not assigned done then done := "0"; end if;
+done := StringToInteger(done) ne 0;
+
 if assigned labels then
     label_list := Split(labels, ":");
 else
@@ -39,9 +43,9 @@ for l in label_list do
 end for;
 
 if #failed gt 0 then
-    printf "DONE: %o failures\n", #failed;
+    if done then printf "DONE: %o failures\n", #failed; end if;
     exit 1;
 end if;
-printf "DONE\n";
+if done then printf "DONE\n"; end if;
 exit 0;
 end procedure();
