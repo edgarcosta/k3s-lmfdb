@@ -92,7 +92,7 @@ function orth_dec(lat: norm_bd := Infinity())
   end for;
 
   if norm_bd le Max(Diagonal(lll)) then
-    "!!! failed to find orthogonal decomposition";
+    vprintf FillGenus: "!!! failed to find orthogonal decomposition\n";
   end if;
   return [lat];
   // error "shouldn't be here"; // this can now happen if norm_bd is set
