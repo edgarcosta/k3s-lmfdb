@@ -1,6 +1,9 @@
 Z := Integers();
-import "/usr/local/magma/package/Lattice/Lat/neighbors.m":BinaryNeighbors,SetDepth,TwoNeighbors,Adjust,IsNonsingularVector,AdjoinNeighbor;
+import !"/Lattice/Lat/neighbors.m":BinaryNeighbors,SetDepth,TwoNeighbors,Adjust,IsNonsingularVector,AdjoinNeighbor;
+// Attach("aut-char.mag");
+// import "aut-char.mag":AutomorphismGroupFaster;
 
+// dep now ignored; retained for backward compatibility
 function newTwoNeighbors(L, dep)
   Lambda := [ Parent(L) | ]; 
   /// L := CoordinateLattice(LLL(L));
@@ -12,7 +15,7 @@ function newTwoNeighbors(L, dep)
   end if;
   L := lll;
   
-  G := ChangeRing( AutomorphismGroup(L : Depth := dep), GF(2));
+  G := ChangeRing( AutomorphismGroupFaster(L:orth_bd := 10), GF(2));
   O := LineOrbits(G);
   vprint Genus: "Number of orbits:", #O;
   TA := 0;
@@ -23,31 +26,37 @@ function newTwoNeighbors(L, dep)
       // now that we have better isomorphism testing, this one is a
       // serious waste of time.
       // AdjoinNeighbor(~TA, ~Lambda, Neighbor(L,v,2), dep);
-      nb := Neighbor(L,v,2);
-      // I believe the issue here is only that sometimes we go from odd to
-      // even and it isn't in the same genus
-      if Genus(nb) eq Genus(L) then
-        vprint Genus,2: "adding new lattice";
-        Append(~Lambda,nb);
-      end if;
+      try
+        nb := Neighbor(L,v,2);
+        // I believe the issue here is only that sometimes we go from odd to
+        // even and it isn't in the same genus
+        if Genus(nb) eq Genus(L) then
+          vprint Genus,2: "adding new lattice";
+          Append(~Lambda,nb);
+        end if;
+      catch e; end try;
       
       B := [ b : b in Basis(L) | (v,b) mod 2 eq 1 ];
       if #B gt 0 then
         v +:= 2*B[1];
         // AdjoinNeighbor(~TA, ~Lambda, Neighbor(L,v,2), dep);
-        nb := Neighbor(L,v,2);
-        if Genus(nb) eq Genus(L) then
-          vprint Genus,2: "adding new lattice";
-          Append(~Lambda,nb);
-        end if;
+        try
+          nb := Neighbor(L,v,2);
+          if Genus(nb) eq Genus(L) then
+            vprint Genus,2: "adding new lattice";
+            Append(~Lambda,nb);
+          end if;
+        catch e;
+        end try;
       end if;
     end if;
   end for;
   return Lambda;
 end function;
 
+// Depth now ignored; retained for backward compatibility
 intrinsic newNeighbours(L::Lat, p::RngIntElt : 
-                    Depth := -1, Bound := 2^32) -> SeqEnum
+                        Depth := -1, Bound := 2^32) -> SeqEnum
    {The immediate p-neighbors of L.}
 
    vprint CanonicalForm,3: "entering newNeighbours";
@@ -66,8 +75,8 @@ intrinsic newNeighbours(L::Lat, p::RngIntElt :
        Lc`AutomorphismGroup := L`AutomorphismGroup;
      end if;
    end if;
-   require Type(Depth) eq RngIntElt and Depth ge -1:
-     "Parameter 'Depth' should be a non-negative integer.";
+   // require Type(Depth) eq RngIntElt and Depth ge -1:
+   //  "Parameter 'Depth' should be a non-negative integer.";
    dep := SetDepth(Rank(L),Depth);
      
    if p^Rank(L) gt Bound then
@@ -91,7 +100,7 @@ intrinsic newNeighbours(L::Lat, p::RngIntElt :
      if not assigned L`AutomorphismGroup then
        vprint CanonicalForm,3: "computing automorphism group";
      end if;
-     G := ChangeRing( AutomorphismGroup(L : Depth := dep), GF(p));
+     G := ChangeRing( AutomorphismGroupFaster(L: orth_bd := 10), GF(p));
      vprint CanonicalForm,3: "computing line orbits";
      O := LineOrbits(G);
      good := true;
