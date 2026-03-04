@@ -1,0 +1,312 @@
+// functions to attempt to test isomorphism of lattices
+// this really needs to be integrated with the automorphism group finder
+
+// lg1 is a lattice digraph object and l2 is a lattice.  The idea of a
+// digraph object is that a vertex is a lattice and the out-edges of a given
+// vertex lead to lattices that are used to compute its automorphism group:
+// so either an orthogonal decomposition or a suitably canonical sublattice.
+// The edges are labeled so that we know what we are doing.
+
+// I think we want to have the lattice at every vertex given as an
+// abstract lattice with an embedding in the one above.
+
+// Note on usage: the idea is that we have one lattice L_0
+// (for example, one obtained in the course of a genus enumeration)
+// and we want to test many lattices L_1, ..., L_n for isomorphism with L_0.
+// First we call aut_graph (defined in aut-char.mag) to create an
+// automorphism graph structure G_0, which records the decompositions used to
+// calculate Aut(L_0) efficiently.  Then we can call isom_graph on
+// G_0 and L_i to decide quickly whether L_0 is isomorphic to L_i and
+// find the isomorphism (if it exists).
+
+// It is hoped that this will speed up genus enumeration.
+
+// Example of usage:
+/*
+AttachSpec("lattices.spec");
+Attach("isom.mag"); 
+import "isom.mag":isom_graph;
+import "aut-char.mag":aut_graph;
+
+gram := DiagonalJoin(CartanMatrix("e8e8"),Matrix([[50]]));
+for i in [1,10] do gram[i,17] := 1; gram[17,i] := 1; end for;
+lat := LatticeWithGram(gram);
+g0 := RandomGLnZ(17,17,17);
+l2 := LatticeWithGram(g0*gram*Transpose(g0));
+lat_gr := aut_graph(lat:sub_bd := 4);
+// now Magma would take forever to find an automorphism between lat and l2, but
+// once the graph is built this is very fast
+time assert isom_graph(lat_gr,l2);
+*/
+
+// we have lattices l1 and l2 with sublattices sl1 and sl2.  Does the
+// automorphism lift, and if so to what?
+// We assume that some trivial checks have already been done.
+
+// This function really should be integrated with the automorphism lift
+// in aut-char.mag, since they do very similar things.
+// if assigned solve_quad then delete solve_quad; end if;
+import "aut-char.mag":solve_quad;
+Z := Integers();
+Q := Rationals();
+
+function lift_isom(l1,sl1_bas,l2,sl2,isom_12)
+  r := Rank(l1); s := #sl1_bas;
+  if r ne Rank(l2) or s ne Rank(sl2) then
+    return false, IdentityMatrix(Z,Rank(l1));
+  end if;
+  
+  rs_l1 := RSpace(Z,r,GramMatrix(l1));
+  q1,toq1 := quo<rs_l1|[Eltseq(l1!i): i in sl1_bas]>;
+  bas_l1 := sl1_bas cat [l1|Eltseq(i@@toq1): i in Basis(q1)];
+  assert Determinant(Matrix(bas_l1)) in [1,-1];
+
+  // the elements of the basis of sl1 have to go to the elements of sl2
+  // given by the automorphism 
+  im_bas := [&+[v[i]*sl2.i: i in [1..s]]: v in Rows(isom_12)];   
+  // now we make the scheme of conditions
+  An := AffineSpace(Q,r*(r-s));
+  Qn := CoordinateRing(An);
+  // I could figure it out myself, or I could get Magma to do it
+  l2_qn := RSpace(Qn,r,ChangeRing(GramMatrix(l2),Qn));
+  known_vecs := [l2_qn!Eltseq(i): i in im_bas];
+  gen_vecs := [&+[Qn.(i+(j-1)*r)*l2_qn.i: i in [1..r]]: j in [1..r-s]];
+  all_vecs := known_vecs cat gen_vecs;
+  all_eqs := [(all_vecs[i],all_vecs[j])-(bas_l1[i],bas_l1[j]): i in [1..r], j in [s+1..r]|i le j];
+  // equations with both the known things should be 0
+  assert forall{i: i,j in [1..s]|(known_vecs[i],known_vecs[j]) eq (sl1_bas[i],sl1_bas[j])};
+
+  Ar := AffineSpace(Q,r);
+  partials := [[[]]];
+  for i in [1..r-s] do
+    // Extract the equations and solve recursively
+    // Trying to reduce the number of variables runs into irritating
+    // nonintegrality issues, but it must be the right way to do things.
+    /* 
+    pcs_ri := [ProjectiveClosure(i): i in schs_ri];
+    rls := [<rl,rlto> where rl,rlto is RemoveLinearRelations(i): i in pcs_ri];
+    arls := [AffinePatch(i[1],1): i in rls];*/
+    eqns_to_i := [x: x in all_eqs|forall{j: j in [i*r+1..r*(r-s)]|Degree(x,j) eq 0}];
+    schs_ri := [Scheme(Ar,[Evaluate(e,&cat p cat [Ar.j: j in [1..r]] cat [0^^(r*(r-s-i))]): e in eqns_to_i]): p in partials[i]];
+    quads := [rep{x: x in DefiningPolynomials(s)|Degree(x) eq 2}: s in schs_ri];
+    poss := [solve_quad(q): q in quads];
+    posses := [[x: x in poss[i]|Ar!x in schs_ri[i]]: i in [1..#poss]];
+    Append(~partials,[Append(partials[i,j],k): k in posses[j], j in [1..#partials[i]]]);
+  end for;
+  if #partials[r-s+1] gt 0 then
+    mat := Matrix(bas_l1)^-1*Matrix(im_bas cat [Vector(Z,i): i in partials[r-s+1,1]]);
+    assert forall{x: x,y in Basis(l1)|(x,y) eq (l2!Eltseq(x*mat),l2!Eltseq(y*mat))};
+    return true, mat;
+  else
+    return false, IdentityMatrix(Z,r);
+  end if;
+end function;
+  
+function initial(g)
+  inits := {x: x in Vertices(g)|InDegree(x) eq 0};
+  assert #inits eq 1;
+  init := Rep(inits);
+  return init;
+end function;
+
+obv_different := func<l,m|Rank(l) eq Rank(m) and Genus(l) ne Genus(m)>;
+
+function isom_graph(lg1,l2)
+  ii := initial(lg1);
+  drop_ii := lg1-ii;
+  l1 := rep{x[1]: x in Support(lg1)|VertexSet(lg1)!x eq ii};
+  if #Vertices(lg1) eq 1 then
+    vprint Lattice,1: "falling back on Magma built-in for lattice of rank", Rank(l2);
+    // remembering to reverse the order
+    is_isom,isom := IsIsomorphic(l2,l1);
+    if not is_isom then isom := Rows(IdentityMatrix(Z,Rank(l1))); end if;
+  else
+    vprint Lattice,1: "recursively reducing the graph";
+    outs := [x: x in EdgeSet(lg1)|InitialVertex(x) eq ii];
+    labels := {Label(i)[1]: i in outs};
+    assert #labels eq 1;
+    od1_emb := [rep{x: x in Support(lg1)|VertexSet(lg1)!x eq TerminalVertex(e)}: e in outs];
+    vprint Lattice,1: "making components";
+
+    supp := Support(drop_ii);
+    origins := [TerminalVertex(i): i in outs];
+    scc := [{x: x in supp|Reachable(i,VertexSet(lg1)!x)}: i in origins];
+    cc1 := [Digraph<i|>: i in scc];
+
+    // duplicate the graph
+    vprint Lattice,2: "duplicating";
+    for e in EdgeSet(lg1) do
+      if e notin outs then
+        i := rep{x: x in [1..#outs]|exists{s: s in scc[x]|VertexSet(lg1)!s eq InitialVertex(e)}};
+        vs := [VertexSet(cc1[i])|rep{s: s in Support(cc1[i])|VertexSet(lg1)!s eq it(e)}: it in [InitialVertex,TerminalVertex]];
+        AddEdge(~cc1[i],vs[1],vs[2],Label(e));
+      end if;
+    end for;
+
+    isoms := [];
+    label_found := false; // why isn't there a default for the case statement?
+    case Rep(labels):
+      when "orth":
+        vprint Lattice,2: "entering orthogonal decomposition";
+        label_found := true;
+        od2 := OrthogonalDecompositionFaster(l2: norm_bd := Label(Rep(outs))[2]);
+        std_od2 := [LatticeWithGram(GramMatrix(i)): i in od2];
+        back_od2 := [func<x|&+[x[j]*Basis(od2[i])[j]: j in [1..Dimension(od2[i])]]>: i in [1..#od2]];
+        rk1 := {*Rank(i[1]): i in od1_emb*};
+        rk2 := {*Rank(i): i in od2*};
+        if rk1 ne rk2 then
+          vprint Lattice,2: "genera do not match";
+          is_isom := false; isom := Identity(GL(Rank(l1),Z));
+        else
+          gen1 := [Genus(i[1]): i in od1_emb];
+          gen2 := [Genus(i): i in od2];
+          if Multiset(gen1) ne Multiset(gen2) then
+            vprint Lattice,2: "genera do not match";
+            is_isom := false; isom := Identity(GL(Rank(l1),Z));
+          else
+            vprint Lattice,2: "genera match, looking for isomorphisms";
+            pairs := []; isoms := [];
+            for i,j in [1..#od2] do
+              is_isom,isom := isom_graph(cc1[i],std_od2[j]);
+              if is_isom then
+                Append(~pairs,{i,#od2+j});
+                // isomorphisms work the opposite way from what I expect
+                // Append(~isoms,[Eltseq(i): i in Rows(isom^-1)]);
+                Append(~isoms,[Eltseq(i): i in Rows(isom)]);
+              end if;
+              // optional: abort early if we see it can't work
+            end for;
+
+            vprint Lattice,2: "matching";
+            gr_pairs := Graph<{1..2*#od2}|Set(pairs)>;
+            mm := MaximumMatching(gr_pairs);
+            if #mm eq #od2 then
+              // assemble the isomorphisms into a coherent whole
+              vprint Lattice,2: "found enough isomorphisms, combining them";
+              bas_in := &cat [x[2]: x in od1_emb];
+              assert Determinant(Matrix(bas_in)) in [1,-1];
+              bas_out := [];
+              // for each component on one side we take the corresponding one
+              // on the other side and use the recursively found automorphisms
+              // to describe the images of the basis
+              for i in [1..#od2] do
+                imi := rep{j-#od2: j in [#od2+1..2*#od2]|{i,j} in pairs and EdgeSet(gr_pairs)!{i,j} in mm};
+                bas_out cat:= [back_od2[imi](&+[v[i]*Basis(std_od2[imi])[i]: i in [1..Rank(od2[imi])]]): v in isoms[Index(pairs,{i,imi+#od2})]];
+              end for;
+              isom := Matrix(bas_in)^-1*Matrix(bas_out);
+              im_bas1 := [l2|Eltseq(i): i in Rows(isom)];
+              assert forall{i: i,j in [1..Rank(l1)]|(l1.i,l1.j) eq (im_bas1[i],im_bas1[j])};
+              vprint Lattice,2: "succeeded";
+              is_isom := true;
+            else
+              vprint Lattice,2: "failed to match components";
+              is_isom := false; isom := Identity(GL(Rank(l2),Z));
+            end if;
+          end if;
+        end if;
+      when "sublat":
+        vprint Lattice,2: "using sublattice to match";
+        label_found := true;
+        assert #outs eq 1;
+        bd := Label(Rep(outs))[2];
+        l2_rs := RSpace(Z,Rank(l2),GramMatrix(l2));
+        sub_l2_rs := sub<l2_rs|[Eltseq(x[1]): x in ShortVectors(l2,bd)]>;
+        sub_l2 := sub<l2|[Eltseq(i): i in Basis(Saturation(sub_l2_rs))]>;
+        sub_l2_lat := LatticeWithGram(GramMatrix(sub_l2));
+        // drop_ii is the graph for the sublattice
+        ii_drop := initial(drop_ii);
+        sub_lg1 := rep{x[1]: x in Support(drop_ii)|VertexSet(drop_ii)!x eq ii_drop};
+        if obv_different(sub_lg1,sub_l2) then
+          is_isom := false; isom := Identity(GL(Rank(l2),Z));
+        else
+          sub_is_isom, sub_isom := isom_graph(drop_ii,sub_l2_lat);
+          if not sub_is_isom then
+            is_isom := false; isom := Identity(GL(Rank(l2),Z));
+          else
+            // the sublattices are isomorphic; we now have to figure out
+            // whether there is an isomorphism that can be lifted
+            aut_hom := Label(Rep(outs))[3];
+            // need to check whether this is on the correct side
+            tr := Transversal(Codomain(aut_hom),Image(aut_hom));
+            // so now we need to check, for each coset, whether the
+            // representative composed with the known isomorphism lifts.
+            sl1_bas := [l1!i: i in rep{x[2]: x in Support(lg1)|VertexSet(lg1)!x eq TerminalVertex(outs[1])}];
+            for t in tr do
+              is_isom,isom := lift_isom(l1,sl1_bas,l2,sub_l2,t*sub_isom);
+              if is_isom then
+                assert forall{x: x,y in Basis(l1)|(x,y) eq (l2!Eltseq(x*isom),l2!Eltseq(y*isom))};
+                break t;
+              end if;
+            end for;
+          end if;
+        end if;
+    end case;
+    error if not label_found, "invalid edge label";
+
+  end if;
+  return is_isom,isom;
+end function;
+
+/*function isom(lg1,l2: orth_bd := Infinity())
+  _ := AutomorphismGroupFaster(l2);
+  init_lg1 := initial(g1);
+  init_lat := rep{x: x in Support(lg1)|VertexSet(lg1)!x eq init_lg1};
+  // basic checking
+  if obv_different(init_lat,l2) then return false; end if; 
+  l1 := rep{x: x in Support(lg1)|VertexSet(lg1)!x eq init_lg1};
+  
+  if #Vertices(lg1) eq 1 then
+    isisom,theisom := IsIsomorphic(l1,l2);
+    ans1 := <isisom,theisom>;
+  else
+    edges := [x: x in EdgeSet(lg1)|InitialVertex(x) eq init_lg1];
+    labels := {@Label(i): i in edges@};
+    assert #labels eq 1;
+    label := Rep(labels);
+    if label[1] eq "sublat" then
+      subl2 := sub<l2|[x[1]: x in ShortVectors(l2,label[2])]>;
+      subg1 := lg1-init_lg1;
+      // would be nice if we had the automorphism group attached
+      ans0 := isom(subg1,subl2);
+      // now try to lift
+      ans1 := ans0; // wrong!
+    elif label[1] eq "orth" then
+      odl2 := orth_dec(l2: norm_bd := label[2]);
+      if #odl2 eq OutDegree(init_lg1) then
+        subg1s := ConnectedComponents(lg1-init_lg1);
+        if forall{i: i in [initial(s): s in subg1s]|exists{o: o in odl2|not obv_different(i,o)}} then
+          matches := [];
+          isoms := [];
+          // can save time by not trying them all if it obviously doesn't work
+          for i,j in [1..#odl2] do
+            isij := isom(subg1s[i],odl2[j]);
+            if isij[1] then
+              Append(~matches,{i,j+#odl2});
+              Append(~isoms,isij[2]);
+            end if;
+          end for;
+        
+          bip := Graph<{1..2*#odl2}|matches>;
+          mm := MaximumMatching(bip);
+          if #mm lt #odl2 then
+            ans1 := <false,false>;
+          else
+            inds := [x: x in [1..#matches]|EdgeSet(bip)!matches[x] in mm];
+            in_bas := &cat [Basis(initial(subg1s[Min(matches[i])])): i in inds];
+            out_bas := &cat [];
+            ans1 := <false,false>; // combine the automorphisms
+          end if;
+        else
+          ans1 := <false,false>;
+        end if;
+      else
+        ans1 := <false,false>;
+      end if;
+    else
+      error "unknown edge label";
+    end if;
+  end if;
+  
+  return ans1;
+end function;
+*/

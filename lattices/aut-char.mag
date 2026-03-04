@@ -33,8 +33,8 @@ aut_lat := aut_char(lat,4); // the first 4 generators give the root lattice
 
 // if the next line is commented out, I get an error when I reload the file
 // if assigned orth_dec then delete orth_dec; end if;
-Attach("orth_dec.mag");
-import "orth_dec.mag": orth_dec;
+// Attach("orth_dec.mag");
+// import "orth_dec.mag": orth_dec,OrthogonalDecompositionFaster;
 Z := Integers();
 Q := Rationals();
 
@@ -76,6 +76,7 @@ function lift(lat,autmat: only_one := false)
   dim := Rank(lat);
   nr := dim-subdim; // "new rank"
   pr := PolynomialRing(Q,dim*(nr));
+  vprint Lattice,2: "defining scheme";
   chlat := RSpace(pr,dim,ChangeRing(GramMatrix(lat),pr));
   imelts := [&+[r[i]*chlat.i: i in [1..subdim]]: r in Rows(autmat)] cat [&+[pr.(i+dim*(d-1))*chlat.i: i in [1..dim]]: d in [1..nr]];
   conds := {@(imelts[i],imelts[j])-GramMatrix(lat)[i,j]: i,j in [1..dim]@};
@@ -91,10 +92,11 @@ function lift(lat,autmat: only_one := false)
     return lifts;
   end if;
   
-    
+  vprintf Lattice,2: "searching for points on scheme ";  
   lifts := [GL(dim,Z)|];
   Qnr := PolynomialRing(Q,nr);
   for s in schs do
+    vprintf Lattice,2: ".";
     ps := ProjectiveClosure(s);
     rl,torl := RemoveLinearRelations(ps);
     /*pcrl := PrimeComponents(rl);
@@ -132,6 +134,7 @@ function lift(lat,autmat: only_one := false)
 
     end for;
   end for;
+  vprintf Lattice,2: "done\n";
   assert forall{n: n in lifts|n*g*Transpose(n) eq g} where g is GramMatrix(lat);
   return lifts;
 end function;
@@ -368,7 +371,8 @@ function aut_max_ind(lat,d: max_ind := 10, aut_sub := false,force := false)
     gi := sub<aut_sub|lift_sub,tr[i]>;
     pairs join:= {@[tr[i],tr[j]]: j in [1..#tr]|tr[j] in gi@};
   end for;
-  
+
+  vprint Lattice, 1: "searching over transversal";
   while #tr gt 0 do
     v := tr[1];
     tr := tr[2..#tr];
@@ -402,12 +406,14 @@ function aut_orth_dec(od,lat)
     same_reps := [rep{i: i in [1..#od]|IsIsomorphic(od[i],od[j])}: j in [1..#od]];
     inds := [x: x in [1..#od]|Index(same_reps,x) eq x];
     od_gr := [LatticeWithGram(GramMatrix(i)): i in od];
+    vprint Lattice, 2: "finding the automorphism groups of the components";
     aut_reps := [aut_faster(od_gr[i]:use_orth_dec := false): i in inds];
     // now we need to put the pieces together
     bases := [Basis(i): i in od];
     invmat := Matrix(&cat bases)^-1;
     // first the automorphisms that just act on one component
     aut_gens := [];
+    vprint Lattice, 2: "making the group that preserves each component";
     for i in [1..#inds], j in Generators(aut_reps[i]) do
       out := bases;
       out[inds[i]] := Rows(j*Matrix(bases[inds[i]]));
@@ -416,10 +422,12 @@ function aut_orth_dec(od,lat)
       Append(~aut_gens,newgen);
     end for;
 
+    vprint Lattice, 2: "finding automorphisms that permute the components";
     // now we match the lattices
     for i in inds do
       matches := [x: x in [1..#od]|same_reps[x] eq i];
       if #matches gt 1 then
+        vprint Lattice, 2: "finding a 2-cycle";
         c12 := x where _,x is IsIsomorphic(od_gr[matches[1]],od_gr[matches[2]]);
         out := bases;
         out[matches[1]] := Rows(c12^-1*Matrix(bases[matches[2]]));
@@ -428,6 +436,7 @@ function aut_orth_dec(od,lat)
         assert Determinant(newgen) in [1,-1] and forall{x: x,y in Basis(lat)|(x,y) eq (x*newgen,y*newgen)};
         Append(~aut_gens,newgen);
         if #matches gt 2 then // we need the other generator of S_n
+          vprintf Lattice, 2: "finding a %o-cycle\n", #matches;
           cs := [x where _,x is IsIsomorphic(od_gr[matches[i]],od_gr[matches[i eq #matches select 1 else i+1]]): i in [1..#matches]];
           out := bases;
           for i in [1..#matches] do out[matches[i]] := Rows(cs[i]^-1*Matrix(bases[matches[i eq #matches select 1 else i+1]])); end for;
@@ -472,11 +481,11 @@ function aut_faster(lat: use_orth_dec := true, orth_bd := 10)
     vprint Lattice,2: "looking at sublattice spanned by vectors of norm at most", i;
     sub_rs := Saturation(sub<rs|[Eltseq(x[1]): x in ShortVectors(lat,i)]>);
     sat_sub2 := sub<lat|Basis(sub_rs)>;
-    if r-Rank(sat_sub2) in [1..3] then keep := sat_sub2; thei := i; end if;
+    if r-Rank(sat_sub2) in [1..4] then keep := sat_sub2; thei := i; end if;
     if r-Rank(sat_sub2) le 1 then break i; end if;
   end for;
   if Rank(keep) eq 0 then return AutomorphismGroup(lat), [lat], 0; end if;
-  if r-Rank(keep) in [1..3] then 
+  if r-Rank(keep) in [1..4] then 
     // rearrange the lattice to put these first
     // doesn't always work
     // bas := rep{Basis(keep) cat [lat.i: i in s]:s in Subsets({1..r},r-Rank(keep))|lat eq sub<lat|keep,[lat.i: i in s]>};
@@ -508,31 +517,47 @@ end function;
 // this one is supposed to produce a graph of lattices and their automorphism
 // groups, to be fed to the functions in isom.mag
 
-// I need to document the data type in detail before I forget it
-function aut_graph(lat: hom_up := Eltseq(IdentityMatrix(Z,Rank(lat))), use_orth_dec := true, orth_bd := 10, sub_bd := 10)
+// The data structure is as follows.  We have a rooted tree, where the
+// vertices are lattices together with a map to the (unique) parent,
+// given as a sequence of numbers rather than a matrix so that they can
+// live in the same universe.
+
+// There are two types of edges (for now): either they indicate an
+// orthogonal decomposition of a lattice, or they represent a characteristic
+// sublattice of small codimension that can be used to compute the
+// automorphism group.  The edge, in the latter case, contains the liftable
+// subgroup and the kernel, which we can use to extend isomorphisms from
+// sublattices.
+
+function aut_graph(lat: hom_up := [Eltseq(i): i in Rows(IdentityMatrix(Z,Rank(lat)))], use_orth_dec := true, orth_bd := 10, sub_bd := 10)
   gr := Digraph<{<lat,hom_up>}|>;
   used_od := false;
   if use_orth_dec then
-    od := orth_dec(lat: norm_bd := orth_bd);
+    vprint Lattice, 1: "finding orthogonal decomposition";
+    od := OrthogonalDecompositionFaster(lat: norm_bd := orth_bd);
     if #od gt 1 then
       used_od := true;
       od_grs := [gr];
+      vprint Lattice, 1: "recursively building graphs of components";
       for i in od do
         li := LatticeWithGram(GramMatrix(i));
-        ag := aut_graph(li: hom_up := Eltseq(Matrix(Basis(i))), use_orth_dec := use_orth_dec, orth_bd := orth_bd);
+        ag := aut_graph(li: hom_up := [Eltseq(r): r in Rows(Matrix(Basis(i)))], use_orth_dec := use_orth_dec, orth_bd := orth_bd);
         Append(~od_grs,ag);
       end for;
+      vprint Lattice, 1: "assembling them to find the automorphism group of the lattice";
       lat`AutomorphismGroup := aut_orth_dec(od,lat);
-      
+
+      vprint Lattice,2: "doing boring stuff with graphs";
       newgr := Digraph<&join [Support(i): i in od_grs]|>;
       for i in od_grs, e in EdgeSet(i) do
-        new_e := [rep{v: v in Support(i)|v eq it(e)}: it in [InitialVertex,TerminalVertex]];
+        new_e := [rep{VertexSet(newgr)!v: v in Support(i)|VertexSet(i)!v eq it(e)}: it in [InitialVertex,TerminalVertex]];
         AddEdge(~newgr,new_e[1],new_e[2],Label(e));
       end for;
       for i in od_grs[2..#od_grs] do
         ii := initial(i);
         e_ii := [VertexSet(newgr)|<lat,hom_up>,rep{x: x in Support(i)|VertexSet(i)!x eq ii}];
-        AddEdge(~newgr,e_ii[1],e_ii[2],<"orth",Index(od_grs,i)-1>);
+        // all edge labels have to belong to the same universe
+        AddEdge(~newgr,e_ii[1],e_ii[2],<"orth",orth_bd,hom<t->t|>> where t is SymmetricGroup(1));
       end for;
     end if;
   end if;
@@ -546,7 +571,7 @@ function aut_graph(lat: hom_up := Eltseq(IdentityMatrix(Z,Rank(lat))), use_orth_
       vprint Lattice,2: "looking at sublattice spanned by vectors of norm at most", i;
       sub_rs := Saturation(sub<rs|[Eltseq(x[1]): x in ShortVectors(lat,i)]>);
       sat_sub2 := sub<lat|Basis(sub_rs)>;
-      if Rank(sat_sub2) gt 0 and r-Rank(sat_sub2) in [1..3] then keep := sat_sub2; thei := i; end if;
+      if Rank(sat_sub2) gt 0 and r-Rank(sat_sub2) in [1..4] then keep := sat_sub2; thei := i; end if;
       if r-Rank(sat_sub2) le 1 then break i; end if;
     end for;
     if Rank(keep) eq 0 then // OK, we give up
@@ -556,13 +581,14 @@ function aut_graph(lat: hom_up := Eltseq(IdentityMatrix(Z,Rank(lat))), use_orth_
       // this is not enough information; we also want to store the
       // information of what can be lifted and the kernel
       latkeep := LatticeWithGram(GramMatrix(keep));
-      lkhom := Eltseq(Matrix(Basis(keep)));
-      lkgr := aut_graph(latkeep: hom_up := Eltseq(lkhom), use_orth_dec := use_orth_dec, orth_bd := orth_bd);
+      lkhom := [Eltseq(r): r in Rows(Matrix(Basis(keep)))];
+      lkgr := aut_graph(latkeep: hom_up := lkhom, use_orth_dec := use_orth_dec, orth_bd := orth_bd);
       new_v := {<lat,hom_up>} join Support(lkgr);
       newgr := Digraph<new_v|>;
+      // this isn't quite right
       for e in EdgeSet(lkgr) do
         new_e := [rep{x: x in Support(lkgr)|VertexSet(lkgr)!x eq it(e)}: it in [InitialVertex,TerminalVertex]];
-        AddEdge(~newgr,new_e[1],new_e[2],Label(e));
+        AddEdge(~newgr,VertexSet(newgr)!new_e[1],VertexSet(newgr)!new_e[2],Label(e));
       end for;
 
       newbas := Basis(keep);

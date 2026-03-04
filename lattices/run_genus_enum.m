@@ -21,7 +21,9 @@ else
 end if;
 
 if not assigned verbose then verbose := "0"; end if;
-SetVerbose("FillGenus", StringToInteger(verbose));
+verbose := StringToInteger(verbose);
+SetVerbose("CanonicalForm", verbose);
+SetVerbose("Genus", verbose);
 
 if not assigned timeout then timeout := "60"; end if;
 timeout := StringToInteger(timeout);
